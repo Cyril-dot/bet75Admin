@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Futball Super Admin — Sign In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  /* Material Symbols utility — mirrors the .icon system in style.css */
+  .ms {
+    font-family: 'Material Symbols Rounded';
+    font-weight: normal;
+    font-style: normal;
+    font-size: 20px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    direction: ltr;
+    -webkit-font-smoothing: antialiased;
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .ms-sm  { font-size: 16px; }
+  .ms-lg  { font-size: 26px; }
+  .ms-xl  { font-size: 32px; }
+  .ms-outline { font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24; }
+</style>
+</head>
+<body class="auth-layout">
+
+<div class="bg-grid"></div>
+<div class="glow"></div>
+
+<div class="auth-wrapper">
+
+  <!-- Brand -->
+  <div class="auth-brand">
+    <div class="logo">
+      <div class="logo-icon">
+        <span class="ms ms-xl">sports_soccer</span>
+      </div>
+      Futball
+    </div>
+    <div class="sub">Super Admin Portal</div>
+  </div>
+
+  <!-- Card -->
+  <div class="auth-card">
+
+    <div id="login-alert"></div>
+
+    <!-- Email -->
+    <div class="form-group">
+      <label>Email Address</label>
+      <div class="input-wrap">
+        <span class="input-icon"><span class="ms ms-sm ms-outline">mail</span></span>
+        <input id="login-email" class="has-icon" type="email"
+               placeholder="admin@futball.app" autocomplete="email">
+      </div>
+    </div>
+
+    <!-- Password -->
+    <div class="form-group">
+      <label>Password</label>
+      <div class="input-wrap">
+        <span class="input-icon"><span class="ms ms-sm ms-outline">lock</span></span>
+        <input id="login-pass" class="has-icon" type="password"
+               placeholder="Your password" autocomplete="current-password"
+               onkeydown="if(event.key==='Enter')doLogin()"
+               style="padding-right:42px">
+        <button class="toggle-pass" onclick="togglePass('login-pass',this)" type="button">
+          <span class="ms ms-sm" id="eye-icon">visibility</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Submit — pressing Enter on the password field also triggers login -->
+    <div style="margin-top:24px">
+      <button class="auth-submit-btn" id="login-btn" onclick="doLogin()" type="button">
+        <span class="ms ms-sm ms-outline">login</span>
+        Sign In
+      </button>
+    </div>
+
+  </div>
+
+  <div class="auth-footer">Futball &copy; 2024 &nbsp;&middot;&nbsp; Super Admin Portal</div>
+</div>
+
+<script>
+const BASE_URL = ''; // 👈 Set your API base URL here, e.g. 'https://api.futball.app'
+
+function togglePass(inputId, btn) {
+  const inp  = document.getElementById(inputId);
+  const icon = document.getElementById('eye-icon');
+  if (inp.type === 'password') {
+    inp.type         = 'text';
+    icon.textContent = 'visibility_off';
+  } else {
+    inp.type         = 'password';
+    icon.textContent = 'visibility';
+  }
+}
+
+function showAlert(containerId, msg, type) {
+  const icons = {
+    success: 'check_circle',
+    error:   'error',
+    info:    'info',
+    warning: 'warning'
+  };
+  document.getElementById(containerId).innerHTML =
+    `<div class="alert alert-${type}">
+       <span class="ms ms-sm">${icons[type] || 'info'}</span>
+       <span>${msg}</span>
+     </div>`;
+}
+
+function clearAlert(id) { document.getElementById(id).innerHTML = ''; }
+
+async function doLogin() {
+  clearAlert('login-alert');
+  const email    = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-pass').value;
+
+  if (!email || !password) {
+    showAlert('login-alert', 'Email and password are required.', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Signing in…';
+
+  try {
+    const res  = await fetch(`${BASE_URL}/api/auth/login`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ email, password })
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || json.error || `HTTP ${res.status}`);
+
+    const token = json.data?.token || json.token || json.data?.accessToken || json.accessToken;
+    if (!token) throw new Error('No token returned. Check your API login endpoint.');
+
+    const role = json.data?.role || json.data?.user?.role || json.role || '';
+    if (role && !['ADMIN', 'SUPER_ADMIN'].includes(role)) {
+      throw new Error(`Access denied. Your role is "${role}". SUPER_ADMIN required.`);
+    }
+
+    localStorage.setItem('fb_token', token);
+    showAlert('login-alert', 'Login successful! Redirecting…', 'success');
+    setTimeout(() => { window.location.href = 'index.html'; }, 700);
+
+  } catch (e) {
+    showAlert('login-alert', e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<span class="ms ms-sm ms-outline">login</span> Sign In';
+  }
+}
+</script>
+</body>
+</html>
