@@ -17,7 +17,7 @@ function closeSidebar() {
 function logout() {
   if (!confirm('Sign out of the Super Admin panel?')) return;
   localStorage.removeItem('fb_token');
-  window.location.href = 'login.html';
+  window.location.href = 'auth.html';
 }
 
 // ==================== API ====================
@@ -1166,12 +1166,12 @@ async function renderAuditLog(page=0) {
 }
 
 // ============================================================
-// INIT — read token from localStorage, redirect to login if missing
+// INIT — read token from localStorage, redirect to auth if missing
 // ============================================================
 window.onload = () => {
   const token = localStorage.getItem('fb_token');
   if (!token) {
-    window.location.href = 'login.html';
+    window.location.href = 'auth.html';
     return;
   }
   config.token = token;
