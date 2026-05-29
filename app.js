@@ -1,5 +1,5 @@
 // ==================== CONFIG ====================
-const BASE_URL = "https:/creative-inspiration-production-f4ea.up.railway.app";
+const BASE_URL = "https://creative-inspiration-production-f4ea.up.railway.app";
 
 let config = { baseUrl: BASE_URL, token: '' };
 
@@ -343,7 +343,7 @@ async function createAdmin() {
 }
 
 // ============================================================
-// 3. USERS — FIX: Don't send role param if empty (avoids 500)
+// 3. USERS
 // ============================================================
 let usersPage = 0, usersSearch = '', usersRole = '';
 
@@ -378,12 +378,9 @@ async function renderUsers(page = 0) {
       </div>
     </div>`;
   try {
-    // FIX: Only append role param when a role is actually selected.
-    // Sending role= (empty string) causes PostgreSQL to fail with a type
-    // cast error on the enum column — "could not determine data type of parameter".
     let q = `?page=${usersPage}&size=20`;
     if (usersSearch && usersSearch.trim()) q += `&search=${encodeURIComponent(usersSearch.trim())}`;
-    if (usersRole)                         q += `&role=${usersRole}`;   // ← only appended when non-empty
+    if (usersRole)                         q += `&role=${usersRole}`;
 
     const data = await api(`/api/super-admin/users${q}`);
     const list = data.content || [];
@@ -437,7 +434,8 @@ async function viewUser(id) {
           ${detailRow('Total Transactions', d.wallet.totalTransactions)}
         </div>` : '<div class="alert alert-info" style="margin-top:12px">ℹ No wallet found for this user.</div>'}
       <div class="modal-footer">
-        <button class="btn-ghost btn-sm" onclick="viewUserTx('${id}')">View Transactions</button>
+        <button class="btn-ghost btn-sm" onclick="viewUserTx('${id}')">Transactions</button>
+        <button class="btn-ghost btn-sm" onclick="viewUserWithdrawals('${id}', '${d.email||''}')">Withdrawals</button>
         <button class="btn-ghost" onclick="closeModal()">Close</button>
       </div>`;
   } catch (e) {
@@ -450,6 +448,64 @@ async function viewUserTx(userId) {
   navigate('transactions');
   txWalletId = '';
   showAlert('Note: to filter by user, get their Wallet ID from the user detail and paste it in the Wallet ID filter.', 'info', 7000);
+}
+
+// ── View a specific user's withdrawals ───────────────────────────────────────
+// Navigates to the Withdrawals page and loads that user's withdrawal history
+// inline via a dedicated modal so you don't lose your place in the Users list.
+async function viewUserWithdrawals(userId, userEmail) {
+  openModal(`Withdrawals — ${userEmail || userId}`, loading('Fetching withdrawal history…'));
+  try {
+    // Fetch all withdrawals and filter client-side by userId since the
+    // endpoint doesn't support a userId query param directly.
+    let allRows = [], p = 0, total = 1;
+    while (p < total && p < 10) {   // cap at 10 pages (500 rows) to avoid hammering
+      const d = await api(`/api/wallet/withdrawals/admin/all?page=${p}&size=50`);
+      allRows = allRows.concat(d.content || []);
+      total = d.totalPages || 1;
+      p++;
+      // Stop early once we've scrolled past all records for this user
+      if ((d.content || []).length === 0) break;
+    }
+
+    const list = allRows.filter(w =>
+      (w.userId && w.userId === userId) ||
+      (w.user && w.user.id === userId)
+    );
+
+    if (!list.length) {
+      document.getElementById('modal-content').innerHTML = `
+        ${empty('No withdrawal requests found for this user.')}
+        <div class="modal-footer"><button class="btn-ghost" onclick="closeModal()">Close</button></div>`;
+      return;
+    }
+
+    const rows = list.map(w => `<tr>
+      ${labeledTd('Date',    `<span class="mono" style="font-size:12px">${fmtDate(w.createdAt)}</span>`)}
+      ${labeledTd('Amount',  `<strong style="color:var(--red-text)">₵${fmt(w.amount)}</strong>`)}
+      ${labeledTd('Method',  `<span class="badge badge-blue">${w.method||'—'}</span>`)}
+      ${labeledTd('Account', `<span class="mono" style="font-size:11px">${w.accountNumber||'—'}<br>${w.accountName||''}</span>`)}
+      ${labeledTd('Status',  statusBadge(w.status))}
+      ${labeledTd('', `<button class="btn-ghost btn-sm" onclick='viewWithdrawal(${JSON.stringify(w).replace(/'/g,"&#39;")})'>Detail</button>`)}
+    </tr>`).join('');
+
+    document.getElementById('modal-content').innerHTML = `
+      <div class="alert alert-info" style="margin-bottom:14px">
+        ℹ Showing <strong>${list.length}</strong> withdrawal request${list.length!==1?'s':''} for this user.
+      </div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Account</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <div class="modal-footer">
+        <button class="btn-ghost btn-sm" onclick="navigate('withdrawals')">Open Full Withdrawals Page</button>
+        <button class="btn-ghost" onclick="closeModal()">Close</button>
+      </div>`;
+  } catch (e) {
+    document.getElementById('modal-content').innerHTML = `
+      <div class="alert alert-error">✕ ${e.message}</div>
+      <div class="modal-footer"><button class="btn-ghost" onclick="closeModal()">Close</button></div>`;
+  }
 }
 
 // ============================================================
@@ -1166,19 +1222,7 @@ async function renderAuditLog(page=0) {
 }
 
 // ============================================================
-// 10. WITHDRAWAL REQUESTS  ← NEW SECTION
-//
-// Flow:
-//   PENDING  → Super admin can: Approve (admin step) or Reject (re-credits wallet)
-//   APPROVED → Super admin can: Settle (confirms payment sent) or Mark Failed (re-credits)
-//   SETTLED / REJECTED / FAILED → read-only
-//
-// Endpoints (from WithdrawalController):
-//   GET  /api/wallet/withdrawals/admin/all           — all withdrawals, filterable
-//   POST /api/wallet/withdrawals/admin/{id}/approve  — approve PENDING
-//   POST /api/wallet/withdrawals/admin/{id}/reject   — reject PENDING  (re-credits wallet)
-//   POST /api/wallet/withdrawals/super-admin/{id}/settle      — settle APPROVED
-//   POST /api/wallet/withdrawals/super-admin/{id}/mark-failed — fail APPROVED (re-credits)
+// 10. WITHDRAWAL REQUESTS
 // ============================================================
 let wdPage=0, wdStatus='';
 
@@ -1299,7 +1343,6 @@ function viewWithdrawal(w) {
     </div>`);
 }
 
-// ── Approve (PENDING → APPROVED) ─────────────────────────────────────────────
 async function approveWithdrawal(id) {
   if (!confirm('Approve this withdrawal request?\n\nThe wallet has already been debited — this just moves it to APPROVED for settlement.')) return;
   try {
@@ -1309,7 +1352,6 @@ async function approveWithdrawal(id) {
   } catch (e) { showAlert('Error: '+e.message, 'error'); }
 }
 
-// ── Reject (PENDING → REJECTED, re-credits wallet) ───────────────────────────
 function openRejectWithdrawal(id) {
   openModal('Reject Withdrawal', `
     <div class="alert alert-warning">⚠ Rejecting will <strong>re-credit</strong> the full amount back to the user's wallet.</div>
@@ -1343,7 +1385,6 @@ async function rejectWithdrawal(id) {
   }
 }
 
-// ── Settle (APPROVED → SETTLED, confirms payment physically sent) ─────────────
 function openSettleWithdrawal(id, amount) {
   openModal('Settle Withdrawal', `
     <div class="alert alert-info">ℹ Settling confirms you have <strong>physically sent ₵${fmt(amount)}</strong> to the user. The WITHDRAW_HOLD transaction will be converted to WITHDRAW.</div>
@@ -1373,7 +1414,6 @@ async function settleWithdrawal(id) {
   }
 }
 
-// ── Mark Failed (APPROVED → FAILED, re-credits wallet) ───────────────────────
 function openFailWithdrawal(id) {
   openModal('Mark Withdrawal Failed', `
     <div class="alert alert-warning">⚠ Marking as failed will <strong>re-credit</strong> the full amount back to the user's wallet.</div>
@@ -1407,7 +1447,6 @@ async function failWithdrawal(id) {
   }
 }
 
-// ── Export CSV ────────────────────────────────────────────────────────────────
 async function exportWithdrawalsCSV() {
   const btn = document.querySelector('[onclick="exportWithdrawalsCSV()"]');
   if (btn) { btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Exporting…'; }
