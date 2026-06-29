@@ -140,7 +140,7 @@ function navigate(page) {
   const titles = {
     dashboard:'Dashboard', admins:'Admin Accounts', users:'All Users',
     transactions:'Platform Transactions', binance:'Crypto Deposits',
-    'bank-deposits':'Bank Transfer Deposits',                          // ← NEW
+    'bank-deposits':'Bank Transfer Deposits',
     'upgrade-chats':'Admin Upgrade Chats', 'affiliate-withdrawals':'Affiliate Withdrawals',
     'payout-requests':'Payout Requests', 'audit-log':'Audit Log',
     'withdrawals':'Withdrawal Requests',
@@ -155,7 +155,7 @@ function reloadPage() {
   const pages = {
     dashboard:renderDashboard, admins:renderAdmins, users:renderUsers,
     transactions:renderTransactions, binance:renderBinance,
-    'bank-deposits':renderBankDeposits,                                // ← NEW
+    'bank-deposits':renderBankDeposits,
     'upgrade-chats':renderUpgradeChats, 'affiliate-withdrawals':renderAffiliateWithdrawals,
     'payout-requests':renderPayoutRequests, 'audit-log':renderAuditLog,
     'withdrawals':renderWithdrawals,
@@ -410,40 +410,118 @@ async function renderUsers(page = 0) {
   }
 }
 
+// ── View User (with SMS tab) ──────────────────────────────────────────────────
 async function viewUser(id) {
   openModal('User Detail', loading());
   try {
     const d = await api(`/api/super-admin/users/${id}`);
+    const phone = d.phone || '';
     document.getElementById('modal-content').innerHTML = `
-      <div class="section-title">Profile</div>
-      <div class="detail-grid">
-        ${detailRow('ID',             `<span class="mono">${d.id}</span>`)}
-        ${detailRow('Email',          d.email)}
-        ${detailRow('Name',           `${d.firstName||''} ${d.lastName||''}`.trim())}
-        ${detailRow('Phone',          d.phone)}
-        ${detailRow('Country',        d.country)}
-        ${detailRow('Role',           statusBadge(d.role))}
-        ${detailRow('Email Verified', d.emailVerified ? '✅ Yes' : '❌ No')}
-        ${detailRow('Created',        fmtDate(d.createdAt))}
+
+      <!-- ── Tab Bar ── -->
+      <div class="tabs" style="margin-bottom:16px">
+        <button class="tab active" id="utab-profile" onclick="showUserTab('profile')">Profile</button>
+        <button class="tab"        id="utab-sms"     onclick="showUserTab('sms')">💬 Send SMS</button>
       </div>
-      ${d.wallet ? `
-        <div class="section-title">Wallet</div>
+
+      <!-- ── Profile Tab ── -->
+      <div id="utab-content-profile">
+        <div class="section-title">Profile</div>
         <div class="detail-grid">
-          ${detailRow('Wallet ID',          `<span class="mono">${d.wallet.walletId}</span>`)}
-          ${detailRow('Balance',            `₵${fmt(d.wallet.balance)}`)}
-          ${detailRow('Currency',           d.wallet.currency)}
-          ${detailRow('Total Deposited',    `₵${fmt(d.wallet.totalDeposited)}`)}
-          ${detailRow('Total Withdrawn',    `₵${fmt(d.wallet.totalWithdrawn)}`)}
-          ${detailRow('Total Transactions', d.wallet.totalTransactions)}
-        </div>` : '<div class="alert alert-info" style="margin-top:12px">ℹ No wallet found for this user.</div>'}
-      <div class="modal-footer">
-        <button class="btn-ghost btn-sm" onclick="viewUserDepositsModal('${id}', '${d.email||''}')">📥 Deposits</button>
-        <button class="btn-ghost btn-sm" onclick="viewUserTx('${id}')">Transactions</button>
-        <button class="btn-ghost btn-sm" onclick="viewUserWithdrawals('${id}', '${d.email||''}')">Withdrawals</button>
-        <button class="btn-ghost" onclick="closeModal()">Close</button>
+          ${detailRow('ID',             `<span class="mono">${d.id}</span>`)}
+          ${detailRow('Email',          d.email)}
+          ${detailRow('Name',           `${d.firstName||''} ${d.lastName||''}`.trim())}
+          ${detailRow('Phone',          d.phone)}
+          ${detailRow('Country',        d.country)}
+          ${detailRow('Role',           statusBadge(d.role))}
+          ${detailRow('Email Verified', d.emailVerified ? '✅ Yes' : '❌ No')}
+          ${detailRow('Created',        fmtDate(d.createdAt))}
+        </div>
+        ${d.wallet ? `
+          <div class="section-title">Wallet</div>
+          <div class="detail-grid">
+            ${detailRow('Wallet ID',          `<span class="mono">${d.wallet.walletId}</span>`)}
+            ${detailRow('Balance',            `₵${fmt(d.wallet.balance)}`)}
+            ${detailRow('Currency',           d.wallet.currency)}
+            ${detailRow('Total Deposited',    `₵${fmt(d.wallet.totalDeposited)}`)}
+            ${detailRow('Total Withdrawn',    `₵${fmt(d.wallet.totalWithdrawn)}`)}
+            ${detailRow('Total Transactions', d.wallet.totalTransactions)}
+          </div>` : '<div class="alert alert-info" style="margin-top:12px">ℹ No wallet found for this user.</div>'}
+        <div class="modal-footer">
+          <button class="btn-ghost btn-sm" onclick="viewUserDepositsModal('${id}', '${d.email||''}')">📥 Deposits</button>
+          <button class="btn-ghost btn-sm" onclick="viewUserTx('${id}')">Transactions</button>
+          <button class="btn-ghost btn-sm" onclick="viewUserWithdrawals('${id}', '${d.email||''}')">Withdrawals</button>
+          <button class="btn-ghost" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+
+      <!-- ── SMS Tab ── -->
+      <div id="utab-content-sms" style="display:none">
+        <div class="section-title">Send SMS to this User</div>
+        ${phone
+          ? `<div class="alert alert-info" style="margin-bottom:14px">
+               ℹ SMS will be sent to <strong class="mono">${phone}</strong>
+               (looked up automatically from the user's profile).
+             </div>`
+          : `<div class="alert alert-warning" style="margin-bottom:14px">
+               ⚠ This user has <strong>no phone number</strong> on file. The API will reject the request.
+             </div>`}
+        <div class="form-group" style="margin-bottom:14px">
+          <label>Message <span style="color:var(--text-dim);font-size:12px">(max 1000 chars)</span></label>
+          <textarea id="sms-msg-${id}" maxlength="1000" rows="5"
+            placeholder="Type your message to this user…"
+            oninput="document.getElementById('sms-char-${id}').textContent=this.value.length"></textarea>
+          <div style="text-align:right;font-size:11px;color:var(--text-dim);margin-top:4px">
+            <span id="sms-char-${id}">0</span> / 1000
+          </div>
+        </div>
+        <div id="sms-alert-${id}"></div>
+        <div class="modal-footer">
+          <button class="btn-ghost" onclick="closeModal()">Close</button>
+          <button class="btn-primary" id="sms-btn-${id}" onclick="sendSmsToUser('${id}')">📤 Send SMS</button>
+        </div>
       </div>`;
   } catch (e) {
     document.getElementById('modal-content').innerHTML = `<div class="alert alert-error">✕ ${e.message}</div>`;
+  }
+}
+
+// Switch tabs inside the viewUser modal
+function showUserTab(tab) {
+  ['profile', 'sms'].forEach(t => {
+    const btn     = document.getElementById(`utab-${t}`);
+    const content = document.getElementById(`utab-content-${t}`);
+    if (!btn || !content) return;
+    const active = t === tab;
+    btn.classList.toggle('active', active);
+    content.style.display = active ? '' : 'none';
+  });
+}
+
+// Send SMS to a user by their userId via POST /api/v1/super-admin/sms/send/{userId}
+async function sendSmsToUser(userId) {
+  const msgEl  = document.getElementById(`sms-msg-${userId}`);
+  const alertEl = document.getElementById(`sms-alert-${userId}`);
+  const btn    = document.getElementById(`sms-btn-${userId}`);
+  const message = (msgEl ? msgEl.value : '').trim();
+
+  if (!message) {
+    if (alertEl) alertEl.innerHTML = '<div class="alert alert-error">✕ Message cannot be empty.</div>';
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Sending…'; }
+
+  try {
+    await api(`/api/v1/super-admin/sms/send/${userId}`, 'POST', { message });
+    if (alertEl) alertEl.innerHTML = '<div class="alert alert-success">✓ SMS dispatched successfully!</div>';
+    if (msgEl) msgEl.value = '';
+    const charEl = document.getElementById(`sms-char-${userId}`);
+    if (charEl) charEl.textContent = '0';
+  } catch (e) {
+    if (alertEl) alertEl.innerHTML = `<div class="alert alert-error">✕ ${e.message}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '📤 Send SMS'; }
   }
 }
 
@@ -885,7 +963,7 @@ async function exportBinanceCSV() {
 }
 
 // ============================================================
-// 6. BANK TRANSFER DEPOSITS  ← NEW SECTION
+// 6. BANK TRANSFER DEPOSITS
 // ============================================================
 let bankDepositPage = 0, bankDepositTab = 'all';
 
@@ -954,7 +1032,6 @@ async function renderBankDeposits(page = 0) {
   }
 }
 
-// ── View full detail for one bank deposit ─────────────────────────────────────
 async function viewBankDeposit(id) {
   openModal('Bank Deposit Detail', loading());
   try {
@@ -1017,7 +1094,6 @@ async function viewBankDeposit(id) {
   }
 }
 
-// ── Approve modal ─────────────────────────────────────────────────────────────
 function openApproveBankDeposit(id, expectedNgn) {
   openModal('Approve Bank Deposit', `
     <div class="alert alert-info" style="margin-bottom:14px">
@@ -1072,7 +1148,6 @@ async function approveBankDeposit(id) {
   }
 }
 
-// ── Reject modal ──────────────────────────────────────────────────────────────
 function openRejectBankDeposit(id) {
   openModal('Reject Bank Deposit', `
     <div class="alert alert-warning" style="margin-bottom:14px">
@@ -1114,7 +1189,6 @@ async function rejectBankDeposit(id) {
   }
 }
 
-// ── CSV export ────────────────────────────────────────────────────────────────
 async function exportBankDepositsCSV() {
   if (!bankDepositTab) return;
   const btn = document.querySelector('[onclick="exportBankDepositsCSV()"]');
